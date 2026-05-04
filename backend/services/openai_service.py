@@ -20,7 +20,7 @@ logger = logging.getLogger("competitor_monitor.openai")
 
 class OpenAIService:
     """Сервис для анализа через ProxyAPI"""
-    
+
     def __init__(self):
         logger.info("=" * 50)
         logger.info("Инициализация OpenAI сервиса")
@@ -28,7 +28,7 @@ class OpenAIService:
         logger.info(f"  Модель текста: {settings.openai_model}")
         logger.info(f"  Модель vision: {settings.openai_vision_model}")
         logger.info(f"  API ключ: {'*' * 10}...{settings.proxy_api_key[-4:] if settings.proxy_api_key else 'НЕ ЗАДАН'}")
-        
+
         # ProxyAPI - OpenAI-совместимый API для России
         self.client = OpenAI(
             api_key=settings.proxy_api_key,
@@ -36,26 +36,26 @@ class OpenAIService:
         )
         self.model = settings.openai_model
         self.vision_model = settings.openai_vision_model
-        
+
         logger.info("OpenAI сервис инициализирован успешно ✓")
         logger.info("=" * 50)
-    
+
     def _parse_json_response(self, content: str) -> dict:
         """Извлечь JSON из ответа модели"""
         logger.debug(f"Парсинг JSON ответа, длина: {len(content)} символов")
-        
+
         # Пробуем найти JSON в markdown блоке
         json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', content)
         if json_match:
             content = json_match.group(1)
             logger.debug("JSON найден в markdown блоке")
-        
+
         # Пробуем найти JSON объект
         json_match = re.search(r'\{[\s\S]*\}', content)
         if json_match:
             content = json_match.group(0)
             logger.debug("JSON объект извлечён")
-        
+
         try:
             result = json.loads(content)
             logger.debug(f"JSON успешно распарсен, ключей: {len(result)}")
@@ -64,7 +64,7 @@ class OpenAIService:
             logger.warning(f"Ошибка парсинга JSON: {e}")
             logger.debug(f"Проблемный контент: {content[:200]}...")
             return {}
-    
+
     async def analyze_text(self, text: str) -> CompetitorAnalysis:
         """Анализ текста конкурента"""
         logger.info("=" * 50)
@@ -72,7 +72,7 @@ class OpenAIService:
         logger.info(f"  Длина текста: {len(text)} символов")
         logger.info(f"  Превью: {text[:100]}...")
         logger.info(f"  Модель: {self.model}")
-        
+
         system_prompt = """Ты — эксперт по конкурентному анализу. Проанализируй предоставленный текст конкурента и верни структурированный JSON-ответ.
 
 Формат ответа (строго JSON):
@@ -81,17 +81,25 @@ class OpenAIService:
     "weaknesses": ["слабая сторона 1", "слабая сторона 2", ...],
     "unique_offers": ["уникальное предложение 1", "уникальное предложение 2", ...],
     "recommendations": ["рекомендация 1", "рекомендация 2", ...],
-    "summary": "Краткое резюме анализа"
+    "summary": "Краткое резюме анализа",
+    "design_score": 7,
+    "animation_potential": 5,
+    "content_quality_score": 8,
+    "design_analysis": "Анализ стиля подачи контента",
+    "animation_recommendations": "Рекомендации по визуализации текста"
 }
 
 Важно:
+- design_score от 0 до 10 (оценка стиля подачи материала, структуры текста)
+- animation_potential от 0 до 10 (насколько контент подходит для анимированной презентации)
+- content_quality_score от 0 до 10 (оценка качества контента)
 - Каждый массив должен содержать 3-5 пунктов
 - Пиши на русском языке
 - Будь конкретен и практичен в рекомендациях"""
 
         start_time = time.time()
         logger.info("  Отправка запроса к API...")
-        
+
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -102,16 +110,16 @@ class OpenAIService:
                 temperature=0.7,
                 max_tokens=2000
             )
-            
+
             elapsed = time.time() - start_time
             logger.info(f"  ✓ Ответ получен за {elapsed:.2f} сек")
-            
+
             content = response.choices[0].message.content
             logger.info(f"  Длина ответа: {len(content)} символов")
             logger.debug(f"  Использовано токенов: {response.usage.total_tokens if response.usage else 'N/A'}")
-            
+
             data = self._parse_json_response(content)
-            
+
             result = CompetitorAnalysis(
                 strengths=data.get("strengths", []),
                 weaknesses=data.get("weaknesses", []),
@@ -119,18 +127,18 @@ class OpenAIService:
                 recommendations=data.get("recommendations", []),
                 summary=data.get("summary", "")
             )
-            
+
             logger.info(f"  Результат: {len(result.strengths)} сильных, {len(result.weaknesses)} слабых сторон")
             logger.info("=" * 50)
-            
+
             return result
-            
+
         except Exception as e:
             elapsed = time.time() - start_time
             logger.error(f"  ✗ Ошибка API за {elapsed:.2f} сек: {e}")
             logger.error("=" * 50)
             raise
-    
+
     async def analyze_image(self, image_base64: str, mime_type: str = "image/jpeg") -> ImageAnalysis:
         """Анализ изображения (баннер, сайт, упаковка)"""
         logger.info("=" * 50)
@@ -138,7 +146,7 @@ class OpenAIService:
         logger.info(f"  Размер base64: {len(image_base64)} символов")
         logger.info(f"  MIME тип: {mime_type}")
         logger.info(f"  Модель: {self.vision_model}")
-        
+
         system_prompt = """Ты — эксперт по визуальному маркетингу и дизайну. Проанализируй изображение конкурента (баннер, сайт, упаковка товара и т.д.) и верни структурированный JSON-ответ.
 
 Формат ответа (строго JSON):
@@ -146,19 +154,26 @@ class OpenAIService:
     "description": "Детальное описание того, что изображено",
     "marketing_insights": ["инсайт 1", "инсайт 2", ...],
     "visual_style_score": 7,
+    "design_score": 8,
+    "animation_potential": 6,
     "visual_style_analysis": "Анализ визуального стиля конкурента",
+    "design_analysis": "Анализ дизайна: композиция, цвета, типографика",
+    "animation_recommendations": "Рекомендации по добавлению анимации",
     "recommendations": ["рекомендация 1", "рекомендация 2", ...]
 }
 
 Важно:
-- visual_style_score от 0 до 10
+- visual_style_score от 0 до 10 (оценка общего визуального стиля)
+- design_score от 0 до 10 (оценка качества дизайна: композиция, цвета, шрифты)
+- animation_potential от 0 до 10 (насколько изображение подходит для анимации)
 - Каждый массив должен содержать 3-5 пунктов
 - Пиши на русском языке
-- Оценивай: цветовую палитру, типографику, композицию, UX/UI элементы"""
+- Оценивай: цветовую палитру, типографику, композицию, UX/UI элементы
+- Учитывай потенциал для micro-interactions, hover-эффектов, переходов"""
 
         start_time = time.time()
         logger.info("  Отправка запроса к Vision API...")
-        
+
         try:
             response = self.client.chat.completions.create(
                 model=self.vision_model,
@@ -183,39 +198,44 @@ class OpenAIService:
                 temperature=0.7,
                 max_tokens=2000
             )
-            
+
             elapsed = time.time() - start_time
             logger.info(f"  ✓ Ответ получен за {elapsed:.2f} сек")
-            
+
             content = response.choices[0].message.content
             logger.info(f"  Длина ответа: {len(content)} символов")
-            
+
             data = self._parse_json_response(content)
-            
+
             result = ImageAnalysis(
                 description=data.get("description", ""),
                 marketing_insights=data.get("marketing_insights", []),
                 visual_style_score=data.get("visual_style_score", 5),
+                design_score=data.get("design_score", 5),
+                animation_potential=data.get("animation_potential", 5),
                 visual_style_analysis=data.get("visual_style_analysis", ""),
+                design_analysis=data.get("design_analysis", ""),
+                animation_recommendations=data.get("animation_recommendations", ""),
                 recommendations=data.get("recommendations", [])
             )
-            
-            logger.info(f"  Результат: оценка стиля {result.visual_style_score}/10")
+
+            logger.info(f"  Результат: оценка стиля {result.visual_style_score}/10, дизайн {result.design_score}/10")
+            logger.info(f"  Потенциал анимации: {result.animation_potential}/10")
             logger.info(f"  Инсайтов: {len(result.marketing_insights)}, рекомендаций: {len(result.recommendations)}")
             logger.info("=" * 50)
-            
+
             return result
-            
+
         except Exception as e:
             elapsed = time.time() - start_time
             logger.error(f"  ✗ Ошибка Vision API за {elapsed:.2f} сек: {e}")
             logger.error("=" * 50)
             raise
-    
+
     async def analyze_parsed_content(
-        self, 
-        title: Optional[str], 
-        h1: Optional[str], 
+        self,
+        title: Optional[str],
+        h1: Optional[str],
         paragraph: Optional[str]
     ) -> CompetitorAnalysis:
         """Анализ распарсенного контента сайта"""
@@ -223,7 +243,7 @@ class OpenAIService:
         logger.info(f"  Title: {title[:50] if title else 'N/A'}...")
         logger.info(f"  H1: {h1[:50] if h1 else 'N/A'}...")
         logger.info(f"  Абзац: {paragraph[:50] if paragraph else 'N/A'}...")
-        
+
         content_parts = []
         if title:
             content_parts.append(f"Заголовок страницы (title): {title}")
@@ -231,17 +251,17 @@ class OpenAIService:
             content_parts.append(f"Главный заголовок (H1): {h1}")
         if paragraph:
             content_parts.append(f"Первый абзац: {paragraph}")
-        
+
         combined_text = "\n\n".join(content_parts)
-        
+
         if not combined_text.strip():
             logger.warning("  ⚠ Контент пустой, возвращаем пустой анализ")
             return CompetitorAnalysis(
                 summary="Не удалось извлечь контент для анализа"
             )
-        
+
         return await self.analyze_text(combined_text)
-    
+
     async def analyze_website_screenshot(
         self,
         screenshot_base64: str,
@@ -258,7 +278,7 @@ class OpenAIService:
         logger.info(f"  H1: {h1[:50] if h1 else 'N/A'}...")
         logger.info(f"  Размер скриншота: {len(screenshot_base64)} символов base64")
         logger.info(f"  Модель: {self.vision_model}")
-        
+
         # Формируем контекст из извлечённых данных
         context_parts = [f"URL сайта: {url}"]
         if title:
@@ -267,10 +287,10 @@ class OpenAIService:
             context_parts.append(f"Главный заголовок (H1): {h1}")
         if first_paragraph:
             context_parts.append(f"Текст на странице: {first_paragraph[:300]}")
-        
+
         context = "\n".join(context_parts)
         logger.debug(f"  Контекст:\n{context}")
-        
+
         system_prompt = """Ты — эксперт по конкурентному анализу и UX/UI дизайну. Проанализируй скриншот сайта конкурента и верни структурированный JSON-ответ.
 
 Формат ответа (строго JSON):
@@ -298,7 +318,7 @@ class OpenAIService:
 
         start_time = time.time()
         logger.info("  Отправка скриншота в Vision API...")
-        
+
         try:
             response = self.client.chat.completions.create(
                 model=self.vision_model,
@@ -323,15 +343,15 @@ class OpenAIService:
                 temperature=0.7,
                 max_tokens=3000
             )
-            
+
             elapsed = time.time() - start_time
             logger.info(f"  ✓ Ответ получен за {elapsed:.2f} сек")
-            
+
             content = response.choices[0].message.content
             logger.info(f"  Длина ответа: {len(content)} символов")
-            
+
             data = self._parse_json_response(content)
-            
+
             result = CompetitorAnalysis(
                 strengths=data.get("strengths", []),
                 weaknesses=data.get("weaknesses", []),
@@ -339,7 +359,7 @@ class OpenAIService:
                 recommendations=data.get("recommendations", []),
                 summary=data.get("summary", "")
             )
-            
+
             logger.info(f"  Результат:")
             logger.info(f"    - Сильных сторон: {len(result.strengths)}")
             logger.info(f"    - Слабых сторон: {len(result.weaknesses)}")
@@ -347,9 +367,9 @@ class OpenAIService:
             logger.info(f"    - Рекомендаций: {len(result.recommendations)}")
             logger.info(f"  Резюме: {result.summary[:100]}...")
             logger.info("=" * 50)
-            
+
             return result
-            
+
         except Exception as e:
             elapsed = time.time() - start_time
             logger.error(f"  ✗ Ошибка Vision API за {elapsed:.2f} сек: {e}")

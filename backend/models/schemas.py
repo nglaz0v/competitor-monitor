@@ -34,7 +34,11 @@ class ImageAnalysis(BaseModel):
     description: str = Field("", description="Описание изображения")
     marketing_insights: List[str] = Field(default_factory=list, description="Маркетинговые инсайты")
     visual_style_score: int = Field(0, ge=0, le=10, description="Оценка визуального стиля (0-10)")
+    design_score: int = Field(0, ge=0, le=10, description="Оценка дизайна (0-10)")
+    animation_potential: int = Field(0, ge=0, le=10, description="Потенциал для анимации (0-10)")
     visual_style_analysis: str = Field("", description="Анализ визуального стиля")
+    design_analysis: str = Field("", description="Анализ дизайна")
+    animation_recommendations: str = Field("", description="Рекомендации по анимации")
     recommendations: List[str] = Field(default_factory=list, description="Рекомендации")
 
 
