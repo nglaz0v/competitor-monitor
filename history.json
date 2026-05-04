@@ -1,5 +1,26 @@
 [
   {
+    "id": "2df4bc8d-de85-4440-962c-7da2025bc0d6",
+    "timestamp": "2026-05-04T17:42:04.174560",
+    "request_type": "parse",
+    "request_summary": "URL: https://www.avito.ru",
+    "response_summary": "Страница с ошибкой доступа предоставляет пользователю полезные рекомендации, но нуждается в улучшени"
+  },
+  {
+    "id": "7976f189-2e31-4d73-8e44-399fa5ef9cc6",
+    "timestamp": "2026-05-04T17:41:54.811566",
+    "request_type": "parse",
+    "request_summary": "URL: https://www.sberbank.ru",
+    "response_summary": "Сайт Сбербанка столкнулся с проблемами доступа, что подчеркивает необходимость улучшения пользовател"
+  },
+  {
+    "id": "351081b0-6668-4774-ba6e-63aab886df74",
+    "timestamp": "2026-05-04T17:41:40.831251",
+    "request_type": "parse",
+    "request_summary": "URL: https://www.tinkoff.ru",
+    "response_summary": "Сайт Т-Банк предлагает современный и удобный интерфейс для пользователей, предоставляя широкий спект"
+  },
+  {
     "id": "9be72919-61bd-4e99-baaf-a911f23a4abd",
     "timestamp": "2026-05-04T17:13:25.408775",
     "request_type": "image",

@@ -19,7 +19,8 @@ from backend.models.schemas import (
     ParseDemoRequest,
     ParseDemoResponse,
     ParsedContent,
-    HistoryResponse
+    HistoryResponse,
+    CompetitorAnalysis
 )
 from backend.services.openai_service import openai_service
 from backend.services.parser_service import parser_service
@@ -59,20 +60,20 @@ logger.info("CORS middleware добавлен ✓")
 async def log_requests(request: Request, call_next):
     """Логирование всех HTTP запросов"""
     start_time = time.time()
-    
+
     # Логируем входящий запрос
     logger.info(f"➡️  {request.method} {request.url.path}")
     if request.query_params:
         logger.debug(f"    Query params: {dict(request.query_params)}")
-    
+
     # Выполняем запрос
     response = await call_next(request)
-    
+
     # Логируем ответ
     elapsed = time.time() - start_time
     status_emoji = "✅" if response.status_code < 400 else "❌"
     logger.info(f"{status_emoji} {request.method} {request.url.path} -> {response.status_code} ({elapsed:.3f}s)")
-    
+
     return response
 
 
@@ -119,15 +120,15 @@ async def analyze_text(request: TextAnalysisRequest):
     logger.info("📝 API: АНАЛИЗ ТЕКСТА")
     logger.info(f"  Длина текста: {len(request.text)} символов")
     logger.info(f"  Превью: {request.text[:80]}...")
-    
+
     try:
         start_time = time.time()
-        
+
         analysis = await openai_service.analyze_text(request.text)
-        
+
         elapsed = time.time() - start_time
         logger.info(f"  ✓ Анализ завершён за {elapsed:.2f} сек")
-        
+
         # Сохраняем в историю
         logger.info("  💾 Сохранение в историю...")
         history_service.add_entry(
@@ -135,10 +136,10 @@ async def analyze_text(request: TextAnalysisRequest):
             request_summary=request.text[:100] + "..." if len(request.text) > 100 else request.text,
             response_summary=analysis.summary
         )
-        
+
         logger.info("  ✅ УСПЕХ: Анализ текста завершён")
         logger.info("=" * 50)
-        
+
         return TextAnalysisResponse(
             success=True,
             analysis=analysis
@@ -161,7 +162,7 @@ async def analyze_image(file: UploadFile = File(...)):
     logger.info("🖼️ API: АНАЛИЗ ИЗОБРАЖЕНИЯ")
     logger.info(f"  Имя файла: {file.filename}")
     logger.info(f"  Тип: {file.content_type}")
-    
+
     # Проверяем тип файла
     allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp"]
     if file.content_type not in allowed_types:
@@ -171,29 +172,29 @@ async def analyze_image(file: UploadFile = File(...)):
             status_code=400,
             detail=f"Неподдерживаемый тип файла. Разрешены: {', '.join(allowed_types)}"
         )
-    
+
     try:
         start_time = time.time()
-        
+
         # Читаем и кодируем изображение
         logger.info("  📥 Чтение файла...")
         content = await file.read()
         file_size_kb = len(content) / 1024
         logger.info(f"  Размер файла: {file_size_kb:.1f} KB")
-        
+
         image_base64 = base64.b64encode(content).decode('utf-8')
         logger.info(f"  Base64 размер: {len(image_base64)} символов")
-        
+
         # Анализируем
         logger.info("  🔍 Отправка на анализ...")
         analysis = await openai_service.analyze_image(
             image_base64=image_base64,
             mime_type=file.content_type
         )
-        
+
         elapsed = time.time() - start_time
         logger.info(f"  ✓ Анализ завершён за {elapsed:.2f} сек")
-        
+
         # Сохраняем в историю
         logger.info("  💾 Сохранение в историю...")
         history_service.add_entry(
@@ -201,10 +202,10 @@ async def analyze_image(file: UploadFile = File(...)):
             request_summary=f"Изображение: {file.filename}",
             response_summary=analysis.description[:200] if analysis.description else "Анализ изображения"
         )
-        
+
         logger.info("  ✅ УСПЕХ: Анализ изображения завершён")
         logger.info("=" * 50)
-        
+
         return ImageAnalysisResponse(
             success=True,
             analysis=analysis
@@ -218,6 +219,116 @@ async def analyze_image(file: UploadFile = File(...)):
         )
 
 
+@app.get("/parse_dem0", response_model=ParseDemoResponse)
+async def parse_dem0():
+    """
+    Парсинг и анализ сайтов конкурентов из config.py
+    Автоматически проходит по всем URL из settings.competitor_urls
+    """
+    logger.info("=" * 50)
+    logger.info("🌐 API: ПАРСИНГ САЙТОВ КОНКУРЕНТОВ")
+    logger.info(f"  Количество URL: {len(settings.competitor_urls)}")
+
+    results = []
+    total_start = time.time()
+
+    for url in settings.competitor_urls:
+        logger.info(f"\n{'='*50}")
+        logger.info(f"🔍 Обработка URL: {url}")
+
+        try:
+            # Открываем страницу в Chrome и делаем скриншот
+            parse_start = time.time()
+            title, h1, first_paragraph, screenshot_bytes, error = await parser_service.parse_url(url)
+            parse_elapsed = time.time() - parse_start
+
+            if error:
+                logger.error(f"  ❌ Ошибка парсинга: {error}")
+                results.append(ParsedContent(
+                    url=url,
+                    title=None,
+                    h1=None,
+                    first_paragraph=None,
+                    analysis=CompetitorAnalysis(summary=f"Ошибка: {error}"),
+                    error=error
+                ))
+                continue
+
+            logger.info(f"  📌 Title: {title[:50] if title else 'N/A'}...")
+            logger.info(f"  📌 H1: {h1[:50] if h1 else 'N/A'}...")
+
+            # Конвертируем скриншот в base64
+            screenshot_base64 = parser_service.screenshot_to_base64(screenshot_bytes) if screenshot_bytes else None
+
+            # Анализируем сайт через Vision API (скриншот + контекст)
+            logger.info("  🤖 Запуск AI анализа...")
+            ai_start = time.time()
+
+            if screenshot_base64:
+                analysis = await openai_service.analyze_website_screenshot(
+                    screenshot_base64=screenshot_base64,
+                    url=url,
+                    title=title,
+                    h1=h1,
+                    first_paragraph=first_paragraph
+                )
+            else:
+                logger.warning("  ⚠ Скриншот недоступен, fallback на текстовый анализ")
+                analysis = await openai_service.analyze_parsed_content(
+                    title=title,
+                    h1=h1,
+                    paragraph=first_paragraph
+                )
+
+            ai_elapsed = time.time() - ai_start
+            logger.info(f"  ✓ AI анализ завершён за {ai_elapsed:.2f} сек")
+
+            parsed_content = ParsedContent(
+                url=url,
+                title=title,
+                h1=h1,
+                first_paragraph=first_paragraph,
+                analysis=analysis
+            )
+
+            # Сохраняем в историю
+            logger.info("  💾 Сохранение в историю...")
+            history_service.add_entry(
+                request_type="parse",
+                request_summary=f"URL: {url}",
+                response_summary=analysis.summary[:100] if analysis.summary else f"Title: {title or 'N/A'}"
+            )
+
+            results.append(parsed_content)
+            logger.info(f"  ✅ УСПЕХ: {url}")
+            logger.info(f"    - Парсинг: {parse_elapsed:.2f} сек")
+            logger.info(f"    - AI анализ: {ai_elapsed:.2f} сек")
+
+        except Exception as e:
+            logger.error(f"  ❌ ОШИБКА: {e}")
+            results.append(ParsedContent(
+                url=url,
+                title=None,
+                h1=None,
+                first_paragraph=None,
+                analysis=CompetitorAnalysis(summary=f"Исключение: {str(e)}"),
+                error=str(e)
+            ))
+
+    total_elapsed = time.time() - total_start
+    logger.info(f"\n{'='*50}")
+    logger.info(f"✅ ПАРСИНГ ВСЕХ САЙТОВ ЗАВЕРШЁН за {total_elapsed:.2f} сек")
+    logger.info(f"  Успешно: {sum(1 for r in results if not r.error)}")
+    logger.info(f"  Ошибки: {sum(1 for r in results if r.error)}")
+    logger.info("=" * 50)
+
+    return ParseDemoResponse(
+        success=True,
+        data=results[0] if len(results) == 1 else None,
+        error=None
+    )
+
+
 @app.post("/parse_demo", response_model=ParseDemoResponse)
 async def parse_demo(request: ParseDemoRequest):
     """
@@ -226,17 +337,17 @@ async def parse_demo(request: ParseDemoRequest):
     logger.info("=" * 50)
     logger.info("🌐 API: ПАРСИНГ САЙТА")
     logger.info(f"  URL: {request.url}")
-    
+
     try:
         total_start = time.time()
-        
+
         # Открываем страницу в Chrome и делаем скриншот
         logger.info("  🔍 Запуск парсинга...")
         parse_start = time.time()
         title, h1, first_paragraph, screenshot_bytes, error = await parser_service.parse_url(request.url)
         parse_elapsed = time.time() - parse_start
         logger.info(f"  ✓ Парсинг завершён за {parse_elapsed:.2f} сек")
-        
+
         if error:
             logger.error(f"  ❌ Ошибка парсинга: {error}")
             logger.info("=" * 50)
@@ -244,18 +355,18 @@ async def parse_demo(request: ParseDemoRequest):
                 success=False,
                 error=error
             )
-        
+
         logger.info(f"  📌 Title: {title[:50] if title else 'N/A'}...")
         logger.info(f"  📌 H1: {h1[:50] if h1 else 'N/A'}...")
         logger.info(f"  📌 Screenshot: {len(screenshot_bytes) / 1024:.1f} KB" if screenshot_bytes else "  📌 Screenshot: N/A")
-        
+
         # Конвертируем скриншот в base64
         screenshot_base64 = parser_service.screenshot_to_base64(screenshot_bytes) if screenshot_bytes else None
-        
+
         # Анализируем сайт через Vision API (скриншот + контекст)
         logger.info("  🤖 Запуск AI анализа...")
         ai_start = time.time()
-        
+
         if screenshot_base64:
             analysis = await openai_service.analyze_website_screenshot(
                 screenshot_base64=screenshot_base64,
@@ -271,10 +382,10 @@ async def parse_demo(request: ParseDemoRequest):
                 h1=h1,
                 paragraph=first_paragraph
             )
-        
+
         ai_elapsed = time.time() - ai_start
         logger.info(f"  ✓ AI анализ завершён за {ai_elapsed:.2f} сек")
-        
+
         parsed_content = ParsedContent(
             url=request.url,
             title=title,
@@ -282,7 +393,7 @@ async def parse_demo(request: ParseDemoRequest):
             first_paragraph=first_paragraph,
             analysis=analysis
         )
-        
+
         # Сохраняем в историю
         logger.info("  💾 Сохранение в историю...")
         history_service.add_entry(
@@ -290,13 +401,13 @@ async def parse_demo(request: ParseDemoRequest):
             request_summary=f"URL: {request.url}",
             response_summary=analysis.summary[:100] if analysis.summary else f"Title: {title or 'N/A'}"
         )
-        
+
         total_elapsed = time.time() - total_start
         logger.info(f"  ✅ УСПЕХ: Парсинг и анализ завершён за {total_elapsed:.2f} сек")
         logger.info(f"    - Парсинг: {parse_elapsed:.2f} сек")
         logger.info(f"    - AI анализ: {ai_elapsed:.2f} сек")
         logger.info("=" * 50)
-        
+
         return ParseDemoResponse(
             success=True,
             data=parsed_content

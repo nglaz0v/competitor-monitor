@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     parser_timeout: int = 10
     parser_user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     
+    # URLs конкурентов для мониторинга
+    competitor_urls: list = [
+        "https://www.tinkoff.ru",
+        "https://www.sberbank.ru",
+        "https://www.avito.ru"
+    ]
+    
     class Config:
         env_file = ".env"
         extra = "ignore"
